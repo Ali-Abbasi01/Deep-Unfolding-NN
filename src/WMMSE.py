@@ -23,7 +23,7 @@ for k in range(K):  # transmitter cell index
             H[k][(l, i)] = torch.randn(rx_ant, tx_ant, dtype=torch.cfloat)
 
 class WMMSE_alg():
-    def __init__(self, K, I_k, n_tx, n_rx, H, P_k, sig_i_k, d, alpha, max_iter_mu, tol_mu):
+    def __init__(self, K, I_k, n_tx, n_rx, H, P_k, sig_i_k, d, alpha, max_iter_mu, tol_mu, max_iter_alg, tol_alg):
         self.K = K
         self.I_k = I_k
         self.n_tx = n_tx
@@ -35,6 +35,8 @@ class WMMSE_alg():
         self.alpha = alpha
         self.max_iter_mu = max_iter_mu
         self.tol_mu = tol_mu
+        self.max_iter_alg = max_iter_alg
+        self.tol_alg = tol_alg
 
 
     def algorithm(self):
@@ -51,6 +53,7 @@ class WMMSE_alg():
                         A += a
                     A = A + self.sig_i_k[k][i] @ torch.eye(self.n_rx[k][i])
                     U[k][i] = torch.linalg.inv(A) @ self.H[k][(k, i)] @ V[k][i]
+            return U
 
 
         def update_W(U, V):
@@ -63,7 +66,7 @@ class WMMSE_alg():
             return W
 
 
-        def update_V(U, W):
+        def update_V(U, W, mu):
             V = {}
             for k in range(self.K):
                 V[k] = {}
@@ -74,7 +77,7 @@ class WMMSE_alg():
                         for l in range(self.I_k[j]):
                             b += self.alpha[j][l] * self.H[k][(j, l)] @ U[j][l] @ W[j][l] @ U[j][l].conj().T @ self.H[k][(j, l)]
                         B += b
-                    B = B + mu_star[k] @ torch.eye(self.n_rx[k][i])
+                    B = B + mu[k] @ torch.eye(self.n_rx[k][i])
                     V[k][i] = self.alpha[k][i] * torch.linalg.inv(B) @ self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]
             return V
         
@@ -131,9 +134,28 @@ class WMMSE_alg():
         # Initialize V
 
         # The algorithm
-        for :
-        
+        W = 
+        for _ in range(self.max_iter_alg):
+            W_prm = W
+            U = update_U(V)
+            W = update_W(U, V)
+            mu = calc_mu(U, W)
+            V = update_V(U, W, mu)
 
+            # Check for convergance
+            val1 = 0
+            for j in range(self.K):
+                for l in range(self.I_k[j]):
+                    val1 += torch.log2(torch.linalg.det(W[j][l]))
+
+            val2 = 0
+            for j in range(self.K):
+                for l in range(self.I_k[j]):
+                    val2 += torch.log2(torch.linalg.det(W_prm[j][l]))
+
+            if torch.abs(val1 - val2) <= self.tol_alg:
+                break
+        
         return V
 
 
