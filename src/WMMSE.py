@@ -23,7 +23,7 @@ for k in range(K):  # transmitter cell index
             H[k][(l, i)] = torch.randn(rx_ant, tx_ant, dtype=torch.cfloat)
 
 class WMMSE_alg():
-    def __init__(self, K, I_k, n_tx, n_rx, H, P_k, sig_i_k, d, alpha):
+    def __init__(self, K, I_k, n_tx, n_rx, H, P_k, sig_i_k, d, alpha, max_iter_mu, tol_mu):
         self.K = K
         self.I_k = I_k
         self.n_tx = n_tx
@@ -33,6 +33,9 @@ class WMMSE_alg():
         self.sig_i_k = sig_i_k
         self.d = d
         self.alpha = alpha
+        self.max_iter_mu = max_iter_mu
+        self.tol_mu = tol_mu
+
 
     def algorithm(self):
         def update_U(V):
@@ -57,6 +60,7 @@ class WMMSE_alg():
                 for i in range(self.I_k[k]):
                     E = torch.eye(self.d[k][i]) - U[k][i].conj().T @ self.H[k][(i, k)] @ V[k][i]
                     W[k][i] = torch.linalg.inv(E)
+            return W
 
 
         def update_V(U, W):
@@ -72,33 +76,56 @@ class WMMSE_alg():
                         B += b
                     B = B + mu_star[k] @ torch.eye(self.n_rx[k][i])
                     V[k][i] = self.alpha[k][i] * torch.linalg.inv(B) @ self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]
+            return V
         
 
         def calc_mu(U, W):
-            def lhs(mu):
-                return torch.sum(phi_diag / (lambda_diag + mu)**2)
+            mu = {}
+            C = {}
+            Phi = {}
+            for k in range(self.K):
+                # Calculating C
+                C[k] = 0
+                for j in range(self.K):
+                    for l in range(self.I_k[j]):
+                        C[k] += self.H[k][(j, l)].conj().T @ U[j][l] @ W[j][l] @ U[j][l].conj().T @ self.H[k][(j, l)]
+                
+                # Calcuating Phi
+                D, Lam, Dh = torch.linalg.svd(C[k])
+                F = 0
+                for i in range(self.I_k[k]):
+                    F += torch.abs(self.alpha[k][i])**2 * (self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]) @ (self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]).conj().T
+                Phi[k] = D.conj().T @ F @ D
 
-            # Initialize bounds
-            mu_low = torch.tensor(0.0, dtype=phi_diag.dtype, device=phi_diag.device)
-            mu_high = torch.tensor(1.0, dtype=phi_diag.dtype, device=phi_diag.device)
+                # Bisection search
+                Phi_diag = torch.diagonal(Phi[k])
+                Lam_diag = torch.diagonal(Lam)
 
-            # Expand upper bound until lhs(mu_high) <= Pk
-            while lhs(mu_high) > Pk:
-                mu_high *= 2
+                # Defining the left-hand side
+                def lhs(mu):
+                    return torch.sum(Phi_diag / (Lam_diag + mu)**2)
+                
+                # Initialize bounds
+                mu_low = torch.tensor(0.0)
+                mu_high = torch.tensor(1.0)
 
-            # Bisection search
-            for _ in range(max_iter):
-                mu_mid = (mu_low + mu_high) / 2
-                val = lhs(mu_mid)
+                # Expand upper bound until lhs(mu_high) <= Pk
+                while lhs(mu_high) > self.P_k[k]:
+                    mu_high *= 2 
 
-                if torch.abs(val - Pk) < tol:
-                    break
-                elif val > Pk:
-                    mu_low = mu_mid
-                else:
-                    mu_high = mu_mid
+                # Search
+                for _ in range(self.max_iter_mu):
+                    mu_mid = (mu_low + mu_high) / 2
+                    val = lhs(mu_mid)
 
-            return mu_mid
+                    if torch.abs(val - self.P_k[k]) < self.tol_mu:
+                        break
+                    elif val > self.P_k[k]:
+                        mu_low = mu_mid
+                    else:
+                        mu_high = mu_mid 
+                mu[k] = mu_mid  
+            return mu            
 
 
         # Initialize V
