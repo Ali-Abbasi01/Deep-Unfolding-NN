@@ -74,7 +74,31 @@ class WMMSE_alg():
                     V[k][i] = self.alpha[k][i] * torch.linalg.inv(B) @ self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]
         
 
-        def calc_mu():
+        def calc_mu(U, W):
+            def lhs(mu):
+                return torch.sum(phi_diag / (lambda_diag + mu)**2)
+
+            # Initialize bounds
+            mu_low = torch.tensor(0.0, dtype=phi_diag.dtype, device=phi_diag.device)
+            mu_high = torch.tensor(1.0, dtype=phi_diag.dtype, device=phi_diag.device)
+
+            # Expand upper bound until lhs(mu_high) <= Pk
+            while lhs(mu_high) > Pk:
+                mu_high *= 2
+
+            # Bisection search
+            for _ in range(max_iter):
+                mu_mid = (mu_low + mu_high) / 2
+                val = lhs(mu_mid)
+
+                if torch.abs(val - Pk) < tol:
+                    break
+                elif val > Pk:
+                    mu_low = mu_mid
+                else:
+                    mu_high = mu_mid
+
+            return mu_mid
 
 
         # Initialize V
