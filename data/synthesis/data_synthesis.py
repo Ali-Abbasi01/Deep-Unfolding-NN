@@ -6,68 +6,82 @@ import pandas as pd
 import importlib
 # Get the current working directory
 scripts_dir = os.getcwd()
-# Go up two levels
-project_root = os.path.abspath(os.path.join(scripts_dir, '..', '..'))
+# Go up one level
+project_root = os.path.abspath(os.path.join(scripts_dir, '..'))
 sys.path.append(project_root)
 
-import src.beamforming
-importlib.reload(src.beamforming)
-from src.beamforming import wf_algorithm
+import src.WMMSE
+importlib.reload(src.WMMSE)
+from src.WMMSE import WMMSE_alg
+
 import src.utils
 importlib.reload(src.utils)
-from src.utils import calculate_rate
+from src.utils import calculate_sum_rate
 
-def generate_random_mimo_channels(num_samples, n_rx, n_tx, dtype=torch.complex64):
-    """
-    Generate 'num_samples' random MIMO channels, each of shape (n_rx, n_tx),
-    using a complex normal distribution in PyTorch.
-    Returns a tensor of shape (num_samples, n_rx, n_tx) with complex entries.
-    """
-    # Real and imaginary parts ~ N(0,1)
+def generate_random_mimo_channels(n_rx, n_tx, dtype=torch.complex64):
     real_part = torch.randn(num_samples, n_rx, n_tx)
     imag_part = torch.randn(num_samples, n_rx, n_tx)
     channels = torch.complex(real_part, imag_part).to(dtype)
     return channels
 
-def main(num_samples, n_T, n_R, Pt):
-
-    num_samples = num_samples
-    n_rx = n_R 
-    n_tx = n_T
-    Pt = Pt
-
-    channels = generate_random_mimo_channels(num_samples, n_rx, n_tx)
+def main(num_samples, n_T, n_R, Pt, num_users, d, WMMSE_iter=20):
+    # d: Number of data streams
 
     data_records = []
-
     for i in range(num_samples):
-        ch = channels[i] 
+        H = {}
+        H[0] = {}
+        for k in range(num_users):
+            H[0][(0, k)] = generate_random_mimo_channels(n_R, n_T, dtype=torch.complex64)
+        
+        V_l = []
+        U_l = []
+        W_l = []
+        sum_rate_l = []
+        wmmse = WMMSE_alg(K=1, I_k=[num_users], n_tx=[n_T], n_rx=[[n_R]*num_users], H=H, P_k=[Pt], sig_i_k=[[1]*num_users],
+                          d=d, alpha=[[1]*num_users], max_iter_mu=1000, tol_mu=0.001, max_iter_alg=1000, tol_alg=0.001)
+        for _ in range(WMMSE_iter):
+            V, U, W = wmmse.algorithm()
+            V_l.append(V)
+            U_l.append(U)
+            W_l.append(W)
+            sum_rate = calculate_sum_rate(H, V)
+            sum_rate_l.append(sum_rate)
+        idx = sum_rate_l.index(max(sum_rate_l))
+        V = list(V_l[idx][0].values())
+        U = list(U_l[idx][0].values())
+        W = list(W_l[idx][0].values())
+        sum_rate = sum_rate_l[idx]
+        H = list(H[0].values())
 
-        wf = wf_algorithm(ch, Pt) 
+        H_serial = [
+            {"real": m.real.tolist(), "imag": m.imag.tolist()}
+            for m in H
+        ]
+        V_serial = [
+            {"real": m.real.tolist(), "imag": m.imag.tolist()}
+            for m in V
+        ]
+        U_serial = [
+            {"real": m.real.tolist(), "imag": m.imag.tolist()}
+            for m in U
+        ]
+        W_serial = [
+            {"real": m.real.tolist(), "imag": m.imag.tolist()}
+            for m in W
+        ]
 
-        bf_mat = wf.bf_matrix()
-        p_alloc = wf.p_allocation()
-        Cov = bf_mat @ p_alloc @ bf_mat.conj().T
-        rate = calculate_rate(ch, Cov).real
-        # If `rate` is a torch scalar, convert to Python float
-        if isinstance(rate, torch.Tensor):
-            rate = rate.item()
+        # Append one record (row)
+        data_records.append({
+            "H": H_serial,
+            "V": V_serial,
+            "U": U_serial,
+            "W": W_serial,
+            "sum_rate": sum_rate
+        })
 
-
-        record = {
-            "channel": json.dumps({"real": ch.real.tolist(), "imag": ch.imag.tolist()}),  # Convert complex to JSON
-            "bf_matrix": json.dumps({"real": bf_mat.real.tolist(), "imag": bf_mat.imag.tolist()}), 
-            "p_allocation": json.dumps({"real": p_alloc.real.tolist(), "imag": p_alloc.imag.tolist()}),
-            "rate": rate 
-        }
-        data_records.append(record)
-
-    df = pd.DataFrame(data_records)
-
-    # Save CSV to the same directory as this script
-    output_path = os.path.join(os.getcwd(), "synthesized_data_fixed.csv")
-    df.to_csv(output_path, index=False)
-    print(f"Data saved to {output_path}")
+    with open("synthesized_data.json", "w") as f:
+        json.dump(data_records, f, indent=2)
 
 num_samples = 1000
 n_T = 4
