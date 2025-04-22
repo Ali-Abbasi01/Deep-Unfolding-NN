@@ -126,13 +126,24 @@ class WMMSE_alg():
                     elif val > self.P_k[k]:
                         mu_low = mu_mid
                     else:
-                        mu_high = mu_mid 
+                        mux_high = mu_mid 
                 mu[k] = mu_mid  
             return mu            
 
 
         # Initialize V
-
+        V = {}
+        for k in range(self.K):
+            V[k] = {}
+            for i in range(self.I_k[k]):
+                real = torch.randn(self.n_rx[k][i], self.n_tx[k])
+                imag = torch.randn(self.n_rx[k][i], self.n_tx[k])
+                V[k][i] = torch.complex(real, imag)
+            ss = 0
+            for i in range(self.I_k[k]):
+                ss += torch.trace(V[k][i] @ V[k][i].conj().T)
+            for i in range(self.I_k[k]):
+                V[k][i] = V[k][i] * self.P_k[k]/ss 
         # The algorithm
         W = 
         for _ in range(self.max_iter_alg):
@@ -156,6 +167,6 @@ class WMMSE_alg():
             if torch.abs(val1 - val2) <= self.tol_alg:
                 break
         
-        return V
+        return V, U, W
 
 
