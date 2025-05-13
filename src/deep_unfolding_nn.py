@@ -60,8 +60,14 @@ class Layer(nn.Module):
             A_plus.diagonal(dim1=-2, dim2=-1).copy_(diag_inv)
             return A_plus
 
-        def proj():
-            return
+        def proj_power(V):
+            for i in range(num_samples):
+                s = 0
+                for j in range(self.setup.K):
+                    s += torch.trace(V[i][j] @ V[i][j].conj().T)
+                for j in range(self.setup.K):
+                    V[i][j] = torch.sqrt(self.setup.P/s) * V[i][j]
+            return V
 
         num_samples = len[H]
 
@@ -121,3 +127,21 @@ class Layer(nn.Module):
             for j in range(self.setup.K): 
                 B_inv = plus(B[i][j]) @ self.X_V[j] + B[i][j] @ self.Y_V[j] + self.Z_V[j]
                 V[i][j] = B_inv @ H.iloc[i, j] @ U[i][j] @ W[i][j] + self.O_V[j]
+
+        # Project V
+        V = proj_power(V)
+
+        return V
+
+class DUNN(nn.Module):
+    def __init__(self, num_layers, setup):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            Layer(setup)
+            for _ in num_layers
+        ])
+
+    def forward(self, V, H):
+        for layer in self.layers:
+            V = Layer(V, H)
+        return V
