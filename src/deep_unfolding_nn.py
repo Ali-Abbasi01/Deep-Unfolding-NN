@@ -1,165 +1,123 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import List, Tuple, Optional
 
-############################################################
-#  Complex helpers                                         #
-############################################################
-
-
-def complex_mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Complex matrix multiplication that works for batched tensors.
-    Both inputs: (..., M, K) @ (..., K, N) -> (..., M, N)"""
-    return torch.matmul(a, b)
+# Define the setup
+class setup():
+    def __init__(self, n_tx, n_rx, num_streams, num_users, P):
+        self.n_tx = n_tx
+        self.n_rx = n_rx
+        self.d = num_streams
+        self.K = num_users
+        self.P = P
 
 
-def hermitian(a: torch.Tensor) -> torch.Tensor:
-    """Hermitian (conjugate transpose) for last two dims."""
-    return a.transpose(-2, -1).conj()
-
-
-def proj_power(v: torch.Tensor, p_total: float) -> torch.Tensor:
-    """Project precoding matrix to satisfy total power constraint."""
-    power = torch.sum(torch.real(v * v.conj()))
-    scale = torch.sqrt(p_total / (power + 1e-12))
-    return v * scale
-
-############################################################
-#  Building blocks                                          #
-############################################################
-
-class ParamBlock(nn.Module):
-    """Parameter block that holds X, Y, Z for a single iteration.
-    X, Y, Z are learnable complex matrices (broadcast across batch).
-    Dimensions:
-        Nt: transmit antenna count
-        d : stream/user dimension (columns of V)
-    """
-    def __init__(self, Nt: int, d: int):
+# Define the layer
+class Layer(nn.Module):
+    def __init__(self, setup):
         super().__init__()
-        # initialize with small random values
-        self.X = nn.Parameter(0.1 * torch.randn(Nt, Nt, dtype=torch.cfloat))
-        self.Y = nn.Parameter(0.1 * torch.randn(Nt, Nt, dtype=torch.cfloat))
-        self.Z = nn.Parameter(0.1 * torch.randn(Nt, Nt, dtype=torch.cfloat))
+        self.setup = setup
+        X_U_dict = {}
+        Y_U_dict = {}
+        Z_U_dict = {}
+        O_U_dict = {}
+        X_W_dict = {}
+        Y_W_dict = {}
+        Z_W_dict = {}
+        X_V_dict = {}
+        Y_V_dict = {}
+        Z_V_dict = {}
+        O_V_dict = {}
+        for i in range(self.setup.K):
+            X_U_dict[i] = nn.Parameter(torch.randn(self.setup.n_rx[i], self.setup.n_rx[i]))
+            Y_U_dict[i] = nn.Parameter(torch.randn(self.setup.n_rx[i], self.setup.n_rx[i]))
+            Z_U_dict[i] = nn.Parameter(torch.randn(self.setup.n_rx[i], self.setup.n_rx[i]))
+            O_U_dict[i] = nn.Parameter(torch.randn(self.setup.n_rx[i], self.setup.d[i]))
+            X_W_dict[i] = nn.Parameter(torch.randn(self.setup.d[i], self.setup.d[i]))
+            Y_W_dict[i] = nn.Parameter(torch.randn(self.setup.d[i], self.setup.d[i]))
+            Z_W_dict[i] = nn.Parameter(torch.randn(self.setup.d[i], self.setup.d[i]))
+            X_V_dict[i] = nn.Parameter(torch.randn(self.setup.n_tx, self.setup.n_tx))
+            Y_V_dict[i] = nn.Parameter(torch.randn(self.setup.n_tx, self.setup.n_tx))
+            Z_V_dict[i] = nn.Parameter(torch.randn(self.setup.n_tx, self.setup.n_tx))
+            O_V_dict[i] = nn.Parameter(torch.randn(self.setup.n_tx, self.setup.d[i]))
+        self.X_U = nn.ParameterDict(X_U_dict)
+        self.Y_U = nn.ParameterDict(Y_U_dict)
+        self.Z_U = nn.ParameterDict(Z_U_dict)
+        self.O_U = nn.ParameterDict(O_U_dict)
+        self.X_W = nn.ParameterDict(X_W_dict)
+        self.Y_W = nn.ParameterDict(Y_W_dict)
+        self.Z_W = nn.ParameterDict(Z_W_dict)
+        self.X_V = nn.ParameterDict(X_V_dict)
+        self.Y_V = nn.ParameterDict(Y_V_dict)
+        self.Z_V = nn.ParameterDict(Z_V_dict)
+        self.O_V = nn.ParameterDict(O_V_dict)
 
-    def forward(self, A: torch.Tensor, H: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
-        """Compute U_k or W_k like expression:
-        out = (A^+ X + A Y + Z) H V
-        Args:
-            A : (..., Nt, Nt) complex tensor (e.g., A_k)
-            H : (..., Nr, Nt) complex tensor
-            V : (..., Nt, d ) complex tensor
-        Returns: (..., Nt, d) complex tensor
-        """
-        term = complex_mm(hermitian(A), self.X) + complex_mm(A, self.Y) + self.Z
-        HV = complex_mm(H, V)  # (..., Nr, d)
-        out = complex_mm(term, complex_mm(H, V))  # (..., Nt, d)
-        return out
+    def forward(self, V, H):
 
-############################################################
-#  Iteration block                                          #
-############################################################
+        # A^+ operator
+        def plus(A):
+            diag_inv = 1.0 / A.diagonal(dim1=-2, dim2=-1)
+            A_plus = torch.zeros_like(A)
+            A_plus.diagonal(dim1=-2, dim2=-1).copy_(diag_inv)
+            return A_plus
 
-class IterationBlock(nn.Module):
-    """One unfolded iteration consisting of F, G, J as in the diagram."""
-    def __init__(self, Nt: int, d: int, power: float):
-        super().__init__()
-        self.power = power
-        self.F = ParamBlock(Nt, d)
-        self.G = ParamBlock(Nt, d)
-        self.J = ParamBlock(Nt, d)
+        def proj():
+            return
 
-    def forward(self, A: torch.Tensor, E: torch.Tensor, H: torch.Tensor, V_prev: torch.Tensor):
-        # F-stage
-        U = self.F(A, H, V_prev)
-        # G-stage
-        W = self.G(E, H, U)
-        # J-stage produces next V
-        V = self.J(A, H, W)
-        # enforce power constraint
-        V = proj_power(V, self.power)
-        return V, U, W
+        num_samples = len[H]
 
-############################################################
-#  Full network                                             #
-############################################################
+        # Calculate A
+        A = {}
+        for i in range(num_samples):
+            A[i] = {}
+            for j in range(self.setup.K):
+                s = 0
+                for k in range(self.setup.K):
+                    s += torch.tensor(V[i][k].conj().T @ V[i][k])
+                ey = (1/self.setup.P) * s * torch.eye(self.setup.n_rx[j], dtype=torch.cfloat)
+                s = 0
+                for k in range(self.setup.K):
+                    s += V[i][k] @ V[i][k].conj().T
+                A[i][j] = eye + H.iloc[i, j] @ s @ H.iloc[i, j].conj().T
 
-class NovelBeamformerNet(nn.Module):
-    """Main network wrapping L iteration blocks.
+        # Calculate U
+        U = {}
+        for i in range(num_samples):
+            U[i] = {}
+            for j in range(self.setup.K):
+                A_inv = plus(A[i][j]) @ self.X_U[j] + A[i][j] @ self.Y_U[j] + self.Z_U[j]
+                U[i][j] = A_inv @ H.iloc[i, j] @ V[i][j] + self.O_U[j]
 
-    Args:
-        Nt: transmit antennas
-        d : streams per user (columns of V)
-        L : number of unfolded iterations
-        power: total transmit power budget
-    """
-    def __init__(self, Nt: int, d: int, L: int, power: float = 1.0):
-        super().__init__()
-        self.blocks = nn.ModuleList([IterationBlock(Nt, d, power) for _ in range(L)])
-        self.L = L
-        self.power = power
+        # Calclate E
+        E = {}
+        for i in range(num_samples):
+            E[i] = {}
+            for j in range(self.setup.K):
+                E[i][j] = torch.eye(self.setup.d[j], dtype=torch.cfloat) - U[i][j].conj().T @ H[i][j] @ V[i][j]
+        
+        # Calculate W
+        W = {}
+        for i in range(num_samples):
+            W[i] = {}
+            for j in range(self.setup.K):
+                W[i][j] = plus(E[i][j]) @ self.X_W[j] + E[i][j] @ self.Y_W[j] + self.Z_W[j]
 
-    def forward(self, H: torch.Tensor, V0: Optional[torch.Tensor] = None):
-        """Forward pass.
-        Args:
-            H: (..., Nr, Nt) complex channel matrix
-            V0: optional initial precoder (..., Nt, d). If None, use isotropic.
-        Returns:
-            V_L: final precoder (..., Nt, d)
-        """
-        batch_shape = H.shape[:-2]
-        Nt = H.size(-1)
-        d = self.blocks[0].F.X.size(-1)
-        Nr = H.size(-2)
+        # Calculate B
+        B = {}
+        for i in range(num_samples):
+            B[i] = {}
+            for j in range(self.setup.K):
+                s = 0
+                for k in range(self.setup.K):
+                    s += torch.trace(U[i][k] @ W[i][k] @ U[i][k].conj().T)
+                ey = (1/self.setup.P) * s * torch.eye(self.setup.n_tx, dtype=torch.cfloat)
+                s = 0
+                for k in range(self.setup.K):
+                    s += H.iloc[i, k].conj().T @ U[i][k] @ W[i][k] @ U[i][k].conj().T @ H.iloc[i, k]
 
-        if V0 is None:
-            V0 = torch.randn(*batch_shape, Nt, d, dtype=torch.cfloat)
-            V0 = proj_power(V0, self.power)
-
-        V = V0
-        # dummy placeholders for A and E matrices – in practice these should be
-        # provided or computed outside; here we assume identity for illustration.
-        A = torch.eye(Nt, dtype=torch.cfloat, device=H.device).expand(*batch_shape, Nt, Nt)
-        E = torch.eye(Nt, dtype=torch.cfloat, device=H.device).expand(*batch_shape, Nt, Nt)
-
-        for blk in self.blocks:
-            V, _, _ = blk(A, E, H, V)
-        return V
-
-############################################################
-#  Simple trainer                                           #
-############################################################
-
-class Trainer:
-    """Utility class for training the novel beamformer network with an arbitrary loss."""
-    def __init__(self, model: NovelBeamformerNet, lr: float = 1e-3):
-        self.model = model
-        self.opt = torch.optim.Adam(model.parameters(), lr=lr)
-
-    def train_epoch(self, loader, loss_fn):
-        self.model.train()
-        total_loss = 0.0
-        for H_batch in loader:
-            H_batch = H_batch.to(torch.complex64)
-            self.opt.zero_grad()
-            V_pred = self.model(H_batch)
-            loss = loss_fn(H_batch, V_pred)
-            loss.backward()
-            self.opt.step()
-            total_loss += loss.item()
-        return total_loss / len(loader)
-
-############################################################
-#  Example loss: negative sum‑rate (unsupervised)           #
-############################################################
-
-def sum_rate_loss(H: torch.Tensor, V: torch.Tensor, noise_var: float = 1.0):
-    """Negative sum‑rate for single‑user (treating each column as a stream)."""
-    # Y = H V, Nr×d
-    Y = complex_mm(H, V)
-    Nr, d = Y.shape[-2:]
-    eye = torch.eye(d, dtype=torch.cfloat, device=Y.device)
-    C = eye + (1.0 / noise_var) * complex_mm(hermitian(Y), Y)
-    rate = torch.logdet(C).real
-    return -rate.mean()
+        # Calculate V
+        V = {}
+        for i in range(num_samples):
+            V[i] = {}
+            for j in range(self.setup.K): 
+                B_inv = plus(B[i][j]) @ self.X_V[j] + B[i][j] @ self.Y_V[j] + self.Z_V[j]
+                V[i][j] = B_inv @ H.iloc[i, j] @ U[i][j] @ W[i][j] + self.O_V[j]
