@@ -40,14 +40,14 @@ def sum_rate_loss_BC(H, V, PT):
             for k in range(K):
                 if k == j: pass
                 else:
-                    Omeg1 += V[i][k] @ V[i][k].conj().T
+                    Omeg1 += V[str(i)][str(k)] @ V[str(i)][str(k)].conj().T
             Omeg1 = H.iloc[i, j] @ Omeg1 @ H.iloc[i, j].conj().T
             Omeg2 = 0
             for k in range(K):
-                Omeg2 += torch.trace(V[i][k] @ V[i][k].conj().T)
+                Omeg2 += torch.trace(V[str(i)][str(k)] @ V[str(i)][str(k)].conj().T)
             Omeg2 = (1/PT) * Omeg2 * ey
             Omeg = torch.linalg.inv(Omeg1 + Omeg2)
-            tmp = ey + H.iloc[i, j] @ V[i][j] @ V[i][j].conj().T @ H.iloc[i, j].conj().T @ Omeg
+            tmp = ey + H.iloc[i, j] @ V[str(i)][str(j)] @ V[str(i)][str(j)].conj().T @ H.iloc[i, j].conj().T @ Omeg
             rate = (1/torch.log(torch.tensor(2.0))) * torch.logdet(tmp)
             s += rate
         s_rate.append(s)
