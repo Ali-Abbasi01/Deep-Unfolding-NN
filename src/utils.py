@@ -51,4 +51,4 @@ def sum_rate_loss_BC(H, V, PT):
             rate = (1/torch.log(torch.tensor(2.0))) * torch.logdet(tmp)
             s += rate
         s_rate.append(s)
-    return torch.tensor(s_rate).mean()
+    return (sum(s_rate)/len(s_rate)).real
