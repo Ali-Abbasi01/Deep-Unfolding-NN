@@ -32,7 +32,7 @@ class ChannelCNN(nn.Module):
         for row_idx in range(len(df)):
             row_dict = {}
             for col_idx in range(len(df.columns)):
-                row_dict[str(col_idx)] = df.iloc[row_idx, col_idx]
+                row_dict[str(col_idx)] = df.iloc[row_idx, col_idx].to(torch.cfloat)
             result[str(row_idx)] = row_dict
         return result
 
@@ -41,7 +41,7 @@ class ChannelCNN(nn.Module):
         for i in range(tensor4d.size(0)):
             inner_dict = {}
             for j in range(tensor4d.size(1)):
-                inner_dict[str(j)] = tensor4d[i, j]
+                inner_dict[str(j)] = tensor4d[i, j].to(torch.cfloat)
             nested_dict[str(i)] = inner_dict
         return nested_dict
 
@@ -93,10 +93,15 @@ class Trainer():
             print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}')
 
     def train_unsupervised(self, dataset, num_epochs, batch_size, lr=0.001, penalty_coef=10):
+
         def srate_penalty_obj(H, V, PT, penalty_coef):
 
             K = H.shape[1]
             num_samples = H.shape[0]
+
+            H = H.applymap(lambda x: x.to(torch.cfloat))
+
+            # V = 
 
             s_rate_avg = sum_rate_loss_BC(H, V, PT)
 
