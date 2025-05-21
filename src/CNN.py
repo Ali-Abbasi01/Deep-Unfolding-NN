@@ -1,3 +1,16 @@
+# The CNN model
+import torch
+import pandas as pd
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from typing import List, Dict
+import importlib
+
+import src.utils
+importlib.reload(src.utils)
+from src.utils import sum_rate_loss_BC
+
 # Define the CNN model
 class ChannelCNN(nn.Module):
     def __init__(self, setup):
@@ -12,6 +25,7 @@ class ChannelCNN(nn.Module):
         self.fc2 = nn.Linear(128, 2*self.K*self.d*self.n_tx)  # Output size matches the beamforming matrix
 
     def df_to_tensor(self, x_df):
+        # Coverts dataframe to tensor, also real and imaginary parts of tensor entries are seperated.
         batch_size, K = x_df.shape
         N_r, N_t = x_df.iloc[0, 0].shape
         real_parts = torch.empty((batch_size, K, N_r, N_t))
@@ -28,6 +42,7 @@ class ChannelCNN(nn.Module):
         return x_tensor
 
     def df_to_dict(self, df: pd.DataFrame) -> dict:
+        # Converts dataframe to dictionary
         result = {}
         for row_idx in range(len(df)):
             row_dict = {}
@@ -37,6 +52,7 @@ class ChannelCNN(nn.Module):
         return result
 
     def tensor_to_dict(self, tensor4d: torch.Tensor) -> dict:
+        # Converts tensor to dictionary
         nested_dict = {}
         for i in range(tensor4d.size(0)):
             inner_dict = {}
@@ -54,7 +70,7 @@ class ChannelCNN(nn.Module):
         x = self.fc1(x)
         x = nn.ReLU()(x)
         x = self.fc2(x)
-        x = x.view(x.size(0), 2*self.K, self.n_tx, self.d)  # Reshape to match the target beamforming matrix
+        x = x.view(x.size(0), 2*self.K, self.n_tx, self.d)  # Reshape to match the beamforming matrix
         return x
 
     def predict(self, x):
@@ -62,15 +78,19 @@ class ChannelCNN(nn.Module):
         with torch.no_grad():
             return self.forward(x)
 
+# Defien the training procedure
 class Trainer():
     def __init__(self, setup, model):
         self.setup = setup
         self.model = model
     
+    # Supervised training
     def train_supervised(self, dataset, num_epochs, batch_size, lr=0.001):
         criterion = nn.MSELoss()  # Using Mean Squared Error loss for regression
         optimizer = optim.Adam(self.model.parameters(), lr)
+
         def split_df_batches(df: pd.DataFrame, d: int, batch_size: int):
+            # splits dataframe into batches. Returns a list of tuples, the first entry of which are the channels and the second entry are target beamforming matrices.
             result = []
             num_rows = len(df)
             for i in range(0, num_rows, batch_size):
@@ -79,7 +99,9 @@ class Trainer():
                 second_part = batch.iloc[:, d:]
                 result.append((first_part.reset_index(drop=True), second_part.reset_index(drop=True)))          
             return result
+        
         loader = split_df_batches(df=dataset, d=self.setup.K, batch_size=batch_size)
+
         for epoch in range(num_epochs):
             self.model.train()
             for inputs, targets in loader:
@@ -92,19 +114,15 @@ class Trainer():
                 optimizer.step()
             print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}')
 
+    # Unsupervised training
     def train_unsupervised(self, dataset, num_epochs, batch_size, lr=0.001, penalty_coef=10):
 
         def srate_penalty_obj(H, V, PT, penalty_coef):
-
+            # Calculates the loss which includes average sum rate and average penalty.
             K = H.shape[1]
             num_samples = H.shape[0]
-
             H = H.applymap(lambda x: x.to(torch.cfloat))
-
-            # V = 
-
             s_rate_avg = sum_rate_loss_BC(H, V, PT)
-
             pens = []
             for b in range(num_samples):
                 s_trace = 0
@@ -112,12 +130,9 @@ class Trainer():
                     s_trace += torch.trace(V[str(b)][str(k)] @ V[str(b)][str(k)].conj().T).real
                 pen = penalty_coef * ((s_trace - PT).clamp(min=0) ** 2).mean()
                 pens.append(pen)
-
             loss = (-1)*s_rate_avg + sum(pens)/len(pens)
             return loss
-
-        # criterion = srate_penalty_obj()  # Using Mean Squared Error loss for regression
-        optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        
         def split_df_batches(df: pd.DataFrame, d: int, batch_size: int):
             result = []
             num_rows = len(df)
@@ -127,7 +142,11 @@ class Trainer():
                 second_part = batch.iloc[:, d:]
                 result.append((first_part.reset_index(drop=True), second_part.reset_index(drop=True)))          
             return result
+
+        optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+
         loader = split_df_batches(df=dataset, d=self.setup.K, batch_size=batch_size)
+
         for epoch in range(num_epochs):
             self.model.train()
             for inputs, targets in loader:
