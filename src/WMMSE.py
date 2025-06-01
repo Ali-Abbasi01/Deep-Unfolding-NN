@@ -64,49 +64,62 @@ class WMMSE_alg():
 
         def calc_mu(U, W):
             mu = {}
+            ll = [0] * self.K
+            VV = update_V(U, W, ll)
             for k in range(self.K):
                 # Calculating C
                 C = 0
                 for j in range(self.K):
                     for l in range(self.I_k[j]):
                         C += self.H[k][(j, l)].conj().T @ U[j][l] @ W[j][l] @ U[j][l].conj().T @ self.H[k][(j, l)]
-                
-                # Calcuating Phi
-                D, Lam, Dh = torch.linalg.svd(C)
-                F = 0
+
+                sss = 0
                 for i in range(self.I_k[k]):
-                    F += torch.abs(torch.tensor(self.alpha[k][i]))**2 * (self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]) @ (self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]).conj().T
-                Phi = D.conj().T @ F @ D
+                    sss += torch.trace(VV[k][i] @ VV[k][i].conj().T)
+                # if (torch.det(C) != 0).real & (sss.real <= self.P_k[k]):
+                if 0:
+                    # print('yes')
+                    mu[k] = 0
+                else:
+                    # print('no')
+                    # Calcuating Phi
+                    D, Lam, Dh = torch.linalg.svd(C)
+                    F = 0
+                    for i in range(self.I_k[k]):
+                        F += torch.abs(torch.tensor(self.alpha[k][i]))**2 * (self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]) @ (self.H[k][(k, i)].conj().T @ U[k][i] @ W[k][i]).conj().T
+                    Phi = D.conj().T @ F @ D
 
-                # Bisection search
-                Phi_diag = torch.diagonal(Phi)
-                # Lam_diag = torch.diagonal(Lam)
-                Lam_diag = Lam
+                    # Bisection search
+                    Phi_diag = torch.diagonal(Phi)
+                    # Lam_diag = torch.diagonal(Lam)
+                    Lam_diag = Lam
 
-                # Defining the left-hand side
-                def lhs(mu):
-                    return torch.sum(Phi_diag / (Lam_diag + mu)**2)
-                
-                # Initialize bounds
-                mu_low = torch.tensor(0.0)
-                mu_high = torch.tensor(1.0)
+                    # Defining the left-hand side
+                    def lhs(mu):
+                        return torch.sum(Phi_diag.real / (Lam_diag.real + mu)**2)
+                    
+                    # Initialize bounds
+                    mu_low = torch.tensor(0.0)
+                    mu_high = torch.tensor(1.0)
 
-                # Expand upper bound until lhs(mu_high) <= Pk
-                while lhs(mu_high).real > self.P_k[k]:
-                    mu_high *= 2 
+                    # Expand upper bound until lhs(mu_high) <= Pk
+                    while lhs(mu_high).real > self.P_k[k]:
+                        mu_high *= 2 
 
-                # Search
-                for _ in range(self.max_iter_mu):
-                    mu_mid = (mu_low + mu_high) / 2
-                    val = lhs(mu_mid)
+                    # Search
+                    for _ in range(self.max_iter_mu):
+                        mu_mid = (mu_low + mu_high) / 2
+                        val = lhs(mu_mid)
 
-                    if torch.abs(val - self.P_k[k]) < self.tol_mu:
-                        break
-                    elif val.real > self.P_k[k]:
-                        mu_low = mu_mid
-                    else:
-                        mux_high = mu_mid 
-                mu[k] = mu_mid  
+                        if torch.abs(val - self.P_k[k]) < self.tol_mu:
+                            break
+                        if val.real > self.P_k[k]:
+                            mu_low = mu_mid
+                        else:
+                            mu_high = mu_mid 
+
+                    mu[k] = mu_mid
+
             return mu            
 
 
@@ -115,24 +128,35 @@ class WMMSE_alg():
         for k in range(self.K):
             V[k] = {}
             for i in range(self.I_k[k]):
-                V[k][i] = torch.randn(self.n_tx[k], self.d[k][i], dtype=torch.cfloat)
+                V[k][i] = torch.randn(self.n_tx[k], self.d[k][i], dtype=torch.cdouble)
             ss = 0
             for i in range(self.I_k[k]):
                 ss += torch.trace(V[k][i] @ V[k][i].conj().T)
             for i in range(self.I_k[k]):
-                V[k][i] = V[k][i] * (self.P_k[k])**2/ss 
+                V[k][i] = V[k][i] * ((self.P_k[k])/ss)**0.5
+
+        # Keep record of V, U, and W
+        V_l = []
+        U_l = []
+        W_l = []
 
         # The algorithm
         U = update_U(V)
         W = update_W(U, V)
         mu = calc_mu(U, W)
         V = update_V(U, W, mu)
+        V_l.append(V)
+        U_l.append(U)
+        W_l.append(W)
         for _ in range(self.max_iter_alg):
             W_prm = W
             U = update_U(V)
             W = update_W(U, V)
             mu = calc_mu(U, W)
             V = update_V(U, W, mu)
+            V_l.append(V)
+            U_l.append(U)
+            W_l.append(W)
 
             # Check for convergance
             val1 = 0
@@ -148,4 +172,4 @@ class WMMSE_alg():
             if torch.abs(val1 - val2) <= self.tol_alg:
                 break
         
-        return V, U, W
+        return V_l, U_l, W_l

@@ -7,22 +7,21 @@ def calculate_rate(H, sigma):
     rate = torch.log2(torch.det(M))
     return rate
 
-def calculate_sum_rate(H, V, alpha, sig):
+def calculate_sum_rate(H, I_k, V, alpha, sig):
     sum_rate = 0
     for k in range(len(H)):
-        for i in range(len(H[k])):
-            Nr = H[0][(k, i)]
-            S = torch.zeros((Nr, Nr))
+        for i in range(I_k[k]):
+            Nr = H[0][(k, i)].shape[0]
+            S = torch.zeros((Nr, Nr)).to(torch.cfloat)
             for j in range(len(H)):
-                for l in range(len(H[k])):
+                for l in range(I_k[k]):
                     if (j, l) == (k, i):
                         continue
-                    S += H[j][(k, i)] @ V[j][l] @ V[j][l].conj().T @ H[j][(k, i)].conj().T
-            S += sig[k][i] * torch.eye(Nr)
-            tmp = torch.eye(Nr) + H[k][(k, i)] @ V[k][i] @ V[k][i].conj().T @ H[k][(k, i)].conj().T @ torch.linalg.inv(S)
+                    S += H[j][(k, i)].to(torch.cfloat) @ V[j][l].to(torch.cfloat) @ V[j][l].conj().T.to(torch.cfloat) @ H[j][(k, i)].conj().T.to(torch.cfloat)
+            S += sig[k][i] * torch.eye(Nr).to(torch.cfloat)
+            tmp = torch.eye(Nr).to(torch.cfloat) + H[k][(k, i)].to(torch.cfloat) @ V[k][i].to(torch.cfloat) @ V[k][i].conj().T.to(torch.cfloat) @ H[k][(k, i)].conj().T.to(torch.cfloat) @ torch.linalg.inv(S)
             R = torch.log2(torch.linalg.det(tmp))
             sum_rate += alpha[k][i] * R
-
     return sum_rate
 
 def sum_rate_loss_BC(H, V, PT):
