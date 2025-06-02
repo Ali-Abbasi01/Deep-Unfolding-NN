@@ -128,7 +128,7 @@ class WMMSE_alg():
         for k in range(self.K):
             V[k] = {}
             for i in range(self.I_k[k]):
-                V[k][i] = torch.randn(self.n_tx[k], self.d[k][i], dtype=torch.cdouble)
+                V[k][i] = torch.rand(self.n_tx[k], self.d[k][i], dtype=torch.cdouble)
             ss = 0
             for i in range(self.I_k[k]):
                 ss += torch.trace(V[k][i] @ V[k][i].conj().T)
