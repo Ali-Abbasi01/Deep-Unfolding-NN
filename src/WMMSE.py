@@ -19,7 +19,7 @@ class WMMSE_alg():
         self.tol_alg = tol_alg
 
 
-    def algorithm(self):
+    def algorithm(self, V_init):
         def update_U(V):
             U = {}
             for k in range(self.K):
@@ -123,17 +123,17 @@ class WMMSE_alg():
             return mu            
 
 
-        # Initialize V
-        V = {}
-        for k in range(self.K):
-            V[k] = {}
-            for i in range(self.I_k[k]):
-                V[k][i] = torch.rand(self.n_tx[k], self.d[k][i], dtype=torch.cdouble)
-            ss = 0
-            for i in range(self.I_k[k]):
-                ss += torch.trace(V[k][i] @ V[k][i].conj().T)
-            for i in range(self.I_k[k]):
-                V[k][i] = V[k][i] * ((self.P_k[k])/ss)**0.5
+        # # Initialize V
+        # V = {}
+        # for k in range(self.K):
+        #     V[k] = {}
+        #     for i in range(self.I_k[k]):
+        #         V[k][i] = torch.rand(self.n_tx[k], self.d[k][i], dtype=torch.cdouble)
+        #     ss = 0
+        #     for i in range(self.I_k[k]):
+        #         ss += torch.trace(V[k][i] @ V[k][i].conj().T)
+        #     for i in range(self.I_k[k]):
+        #         V[k][i] = V[k][i] * ((self.P_k[k])/ss)**0.5
 
         # Keep record of V, U, and W
         V_l = []
@@ -141,8 +141,8 @@ class WMMSE_alg():
         W_l = []
 
         # The algorithm
-        U = update_U(V)
-        W = update_W(U, V)
+        U = update_U(V_init)
+        W = update_W(U, V_init)
         mu = calc_mu(U, W)
         V = update_V(U, W, mu)
         V_l.append(V)
