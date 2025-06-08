@@ -1,8 +1,8 @@
-# The single cell WMMSE algorithm
+# WMMSE algorithm for single cell
 
 import torch
 
-class WMMSE_alg():
+class WMMSE_alg_sc():
     def __init__(self, K, n_tx, n_rx, H, PT, sig_k, d, alpha, max_iter_alg, tol_alg):
         self.K = K
         self.n_tx = n_tx
@@ -19,8 +19,8 @@ class WMMSE_alg():
         def update_U(V):
             U = {}
             for k in range(self.K):
-                term1 = (self.sig_k[str(k)] / self.PT) * (sum([torch.trace(V[str(k)] @ V[str(k)].conj().T) for k in range(self.K)])) * torch.eye(self.n_rx[k], dtype=torch.cdouble)
-                term2 = sum([(self.H[str(k)] @ V[str(k)] @ V[str(k)].conj().T @ self.H[str(k)].conj().T)for k in range(self.K)])
+                term1 = (self.sig_k[k] / self.PT) * (sum([torch.trace(V[str(k)] @ V[str(k)].conj().T) for k in range(self.K)])) * torch.eye(self.n_rx[k], dtype=torch.cdouble)
+                term2 = sum([(self.H[str(k)] @ V[str(l)] @ V[str(l)].conj().T @ self.H[str(k)].conj().T)for l in range(self.K)])
                 A = term1 + term2
                 U[str(k)] = torch.linalg.inv(A) @ self.H[str(k)] @ V[str(k)]
             return U
@@ -35,15 +35,17 @@ class WMMSE_alg():
         def update_V(U, W):
             V = {}
             for k in range(self.K):
-                term1 = (sum([((self.sig_k[k] / self.PT) * torch.trace(self.alpha[str(k)] * U[str(k)] @ W[str(k)] @ U[str(k)].conj().T)) for k in range(self.K)])) * torch.eye(self.n_tx, dtype=torch.cdouble)
-                term2 = sum([(self.alpha[str(k)] * self.H[str(k)].conj().T @ U[str(k)] @ W[str(k)] @ U[str(k)].conj().T @ self.H[str(k)]) for k in range(self.K)])
+                term1 = (sum([((self.sig_k[k] / self.PT) * torch.trace(self.alpha[k] * U[str(k)] @ W[str(k)] @ U[str(k)].conj().T)) for k in range(self.K)])) * torch.eye(self.n_tx, dtype=torch.cdouble)
+                term2 = sum([(self.alpha[k] * self.H[str(k)].conj().T @ U[str(k)] @ W[str(k)] @ U[str(k)].conj().T @ self.H[str(k)]) for k in range(self.K)])
                 B = term1 + term2
-                V[str(k)] = self.alpha[str(k)] * torch.linalg.inv(B) @ self.H[str(k)].conj().T @ U[str(k)] @ W[str(k)]
-            return V
+                V[str(k)] = self.alpha[k] * torch.linalg.inv(B) @ self.H[str(k)].conj().T @ U[str(k)] @ W[str(k)]
+            V_proj = proj_power(V)
+            return V_proj
         
         def proj_power(V):
-            alph = torch.sqrt(self.PT) / torch.sqrt(sum([torch.trace(V[str(k)] @ V[str(k)].conj().T) for k in range(self.K)]))
-            return alph * V
+            alph = torch.sqrt(torch.tensor(self.PT)) / torch.sqrt(torch.tensor(sum([torch.trace(V[str(k)] @ V[str(k)].conj().T) for k in range(self.K)])))
+            V_proj = {str(k): alph * V[str(k)] for k in range(self.K)}
+            return V_proj
         
         # Keep record of V, U, and W
         V_l = []
@@ -52,7 +54,7 @@ class WMMSE_alg():
 
         # The algorithm
         U = update_U(V_init)
-        W = update_W(U, V)
+        W = update_W(U, V_init)
         V = update_V(U, W)
         V_l.append(V)
         U_l.append(U)
@@ -78,7 +80,4 @@ class WMMSE_alg():
             if torch.abs(val1 - val2) <= self.tol_alg:
                 break
         
-        V_opt = proj_power(V)
-        
-        return V_opt, V_l, U_l, W_l
-
+        return V_l, U_l, W_l

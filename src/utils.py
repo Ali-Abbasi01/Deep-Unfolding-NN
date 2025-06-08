@@ -51,3 +51,20 @@ def sum_rate_loss_BC(H, V, PT):
             s += rate
         s_rate.append(s)
     return (sum(s_rate)/len(s_rate)).real
+
+def calculate_sum_rate_sc(H, V, alpha, sig):
+    # Calculate sum rate for single cell
+    sum_rate = 0
+    for k in range(len(H)):
+        Nr = H[str(k)].shape[0]
+        # Calculate Omega
+        S = 0
+        for l in range(len(H)):
+            if l == k: pass
+            else:
+                S += H[str(k)] @ V[str(l)] @ V[str(l)].conj().T @ H[str(k)].conj().T
+        S += sig[k] * torch.eye(Nr, dtype=torch.cdouble)
+        tmp = torch.eye(Nr, dtype=torch.cdouble) + H[str(k)] @ V[str(k)] @ V[str(k)].conj().T @ H[str(k)].conj().T @ torch.linalg.inv(S)
+        R = torch.log2(torch.linalg.det(tmp))
+        sum_rate += alpha[k] * R
+    return sum_rate
