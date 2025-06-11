@@ -60,7 +60,7 @@ class Layer(nn.Module):
                 for j in range(self.setup.K):
                     s += torch.trace(V[str(i)][str(j)] @ V[str(i)][str(j)].conj().T)
                 for j in range(self.setup.K):
-                    V[str(i)][str(j)] = torch.sqrt(self.setup.P/s) * V[str(i)][str(j)]
+                    V[str(i)][str(j)] = torch.sqrt(self.setup.PT/s) * V[str(i)][str(j)]
             return V
 
         num_samples = len(H)
@@ -73,7 +73,7 @@ class Layer(nn.Module):
                 s = 0
                 for k in range(self.setup.K):
                     s += torch.trace(V[str(i)][str(k)].conj().T @ V[str(i)][str(k)])
-                ey = (1/self.setup.P) * s * torch.eye(self.setup.n_rx[j], dtype=torch.cfloat)
+                ey = (1/self.setup.PT) * s * torch.eye(self.setup.n_rx[j], dtype=torch.cfloat)
                 s = 0
                 for k in range(self.setup.K):
                     s += V[str(i)][str(k)] @ V[str(i)][str(k)].conj().T
@@ -107,7 +107,7 @@ class Layer(nn.Module):
             s = 0
             for k in range(self.setup.K):
                 s += torch.trace(U[str(i)][str(k)] @ W[str(i)][str(k)] @ U[str(i)][str(k)].conj().T)
-            ey = (1/self.setup.P) * s * torch.eye(self.setup.n_tx, dtype=torch.cfloat)
+            ey = (1/self.setup.PT) * s * torch.eye(self.setup.n_tx, dtype=torch.cfloat)
             s = 0
             for k in range(self.setup.K):
                 s += H.iloc[i, k].conj().T @ U[str(i)][str(k)] @ W[str(i)][str(k)] @ U[str(i)][str(k)].conj().T @ H.iloc[i, k]
@@ -148,35 +148,35 @@ class Trainer:
         self.model = model
         self.opt = torch.optim.Adam(model.parameters(), lr=lr)
 
-    def train_epoch(self, H_df, loss_fn, num_epochs, batch_size):
+    def train_epoch(self, H_df, loss_fn, num_epochs, batch_size, V_init):
 
         # Function for initializing V
-        def init_V(H_df, setup):
-            num_samples = H_df.shape[0]
-            K = setup.K
-            V_dict = {}
+        # def init_V(H_df, setup):
+        #     num_samples = H_df.shape[0]
+        #     K = setup.K
+        #     V_dict = {}
 
-            for sample_idx in range(num_samples):
-                V_sample = {}
-                H_sample = [H_df.iloc[sample_idx, k] for k in range(K)]
+        #     for sample_idx in range(num_samples):
+        #         V_sample = {}
+        #         H_sample = [H_df.iloc[sample_idx, k] for k in range(K)]
 
-                for k in range(K):
-                    # Create interference channel matrix for all users ≠ k
-                    H_interference = torch.cat([H_sample[j] for j in range(K) if j != k], dim=0)
+        #         for k in range(K):
+        #             # Create interference channel matrix for all users ≠ k
+        #             H_interference = torch.cat([H_sample[j] for j in range(K) if j != k], dim=0)
 
-                    # Compute null space of interference channel using SVD
-                    _, S, Vh = torch.linalg.svd(H_interference)
-                    rank = (S > 1e-6).sum().item()
-                    null_space = Vh[rank:].conj().T  # shape: [n_tx, nullity]
+        #             # Compute null space of interference channel using SVD
+        #             _, S, Vh = torch.linalg.svd(H_interference)
+        #             rank = (S > 1e-6).sum().item()
+        #             null_space = Vh[rank:].conj().T  # shape: [n_tx, nullity]
 
-                    # Choose as many columns as the number of streams we want (≤ nullity)
-                    d_k = min(setup.n_rx[k], null_space.shape[1])
-                    V_k = null_space[:, :d_k]
+        #             # Choose as many columns as the number of streams we want (≤ nullity)
+        #             d_k = min(setup.n_rx[k], null_space.shape[1])
+        #             V_k = null_space[:, :d_k]
 
-                    V_sample[str(k)] = V_k
+        #             V_sample[str(k)] = V_k
 
-                V_dict[str(sample_idx)] = V_sample
-            return V_dict
+        #         V_dict[str(sample_idx)] = V_sample
+        #     return V_dict
 
         def proj_power(V):
             for i in range(len(V)):
@@ -184,7 +184,7 @@ class Trainer:
                 for j in range(self.setup.K):
                     s += torch.trace(V[str(i)][str(j)] @ V[str(i)][str(j)].conj().T)
                 for j in range(self.setup.K):
-                    V[str(i)][str(j)] = torch.sqrt(self.setup.P/s) * V[str(i)][str(j)]
+                    V[str(i)][str(j)] = torch.sqrt(self.setup.PT/s) * V[str(i)][str(j)]
             return V
 
         def shuffle_and_batch(df, batch_size):
@@ -200,10 +200,11 @@ class Trainer:
                 # H_batch = H_batch.to(torch.complex64)
                 self.opt.zero_grad()
                 # Initialize V
-                V0 = init_V(H_batch, self.setup)
-                V0 = proj_power(V0)
+                # V0 = init_V(H_batch, self.setup)
+                # V0 = proj_power(V0)
+                V0 = V_init
                 V_pred = self.model(V0, H_batch)
-                loss = loss_fn(H_batch, V_pred, self.setup.P)
+                loss = loss_fn(H_batch, V_pred, self.setup.PT)
                 loss.backward()
                 self.opt.step()
                 total_loss += loss.item()
