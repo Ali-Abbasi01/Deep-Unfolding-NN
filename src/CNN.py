@@ -47,7 +47,7 @@ class ChannelCNN(nn.Module):
         for row_idx in range(len(df)):
             row_dict = {}
             for col_idx in range(len(df.columns)):
-                row_dict[str(col_idx)] = df.iloc[row_idx, col_idx].to(torch.cfloat)
+                row_dict[str(col_idx)] = df.iloc[row_idx, col_idx].to(torch.cdouble)
             result[str(row_idx)] = row_dict
         return result
 
@@ -57,7 +57,7 @@ class ChannelCNN(nn.Module):
         for i in range(tensor4d.size(0)):
             inner_dict = {}
             for j in range(tensor4d.size(1)):
-                inner_dict[str(j)] = tensor4d[i, j].to(torch.cfloat)
+                inner_dict[str(j)] = tensor4d[i, j].to(torch.cdouble)
             nested_dict[str(i)] = inner_dict
         return nested_dict
 
@@ -105,11 +105,11 @@ class Trainer():
         for epoch in range(num_epochs):
             self.model.train()
             for inputs, targets in loader:
-                inputs = self.model.df_to_tensor(inputs)
-                targets = self.model.df_to_tensor(targets)
+                inputs_tensor = self.model.df_to_tensor(inputs)
+                targets_tensor = self.model.df_to_tensor(targets)
                 optimizer.zero_grad()
-                outputs = self.model(inputs)
-                loss = criterion(outputs, targets)
+                outputs = self.model(inputs_tensor)
+                loss = criterion(outputs, targets_tensor)
                 loss.backward()
                 optimizer.step()
             print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}')
@@ -121,14 +121,17 @@ class Trainer():
             # Calculates the loss which includes average sum rate and average penalty.
             K = H.shape[1]
             num_samples = H.shape[0]
-            H = H.applymap(lambda x: x.to(torch.cfloat))
+            H = H.applymap(lambda x: x.to(torch.cdouble))
             s_rate_avg = sum_rate_loss_BC(H, V, PT)
             pens = []
             for b in range(num_samples):
                 s_trace = 0
                 for k in range(K):
                     s_trace += torch.trace(V[str(b)][str(k)] @ V[str(b)][str(k)].conj().T).real
-                pen = penalty_coef * ((s_trace - PT).clamp(min=0) ** 2).mean()
+                # print(s_trace)
+                # pen = penalty_coef * ((s_trace - PT).clamp(min=0) ** 2).mean()
+                pen = penalty_coef * ((s_trace - PT).clamp(min=0) ** 2)
+                # print(pen)
                 pens.append(pen)
             loss = (-1)*s_rate_avg + sum(pens)/len(pens)
             return loss
@@ -143,7 +146,7 @@ class Trainer():
                 result.append((first_part.reset_index(drop=True), second_part.reset_index(drop=True)))          
             return result
 
-        optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
         loader = split_df_batches(df=dataset, d=self.setup.K, batch_size=batch_size)
 
@@ -152,8 +155,10 @@ class Trainer():
             for inputs, targets in loader:
                 # targets = self.model.df_to_dict(targets)
                 optimizer.zero_grad()
-                outputs = self.model(self.model.df_to_tensor(inputs))
-                loss = srate_penalty_obj(inputs, self.model.tensor_to_dict(outputs), self.setup.PT, penalty_coef)
+                inputs_tensor = self.model.df_to_tensor(inputs)
+                outputs = self.model(inputs_tensor)
+                outputs_dict = self.model.tensor_to_dict(outputs)
+                loss = srate_penalty_obj(inputs, outputs_dict, self.setup.PT, penalty_coef)
                 loss.backward()
                 optimizer.step()
             print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}')
