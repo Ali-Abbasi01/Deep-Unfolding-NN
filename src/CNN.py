@@ -75,8 +75,9 @@ class ChannelCNN(nn.Module):
 
     def predict(self, x):
         self.eval()
+        inputs_tensor = self.df_to_tensor(x)
         with torch.no_grad():
-            return self.forward(x)
+            return self.forward(inputs_tensor)
 
 # Defien the training procedure
 class Trainer():
